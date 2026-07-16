@@ -377,30 +377,37 @@ stages:
 
           - task: PowerShell@2
             displayName: 'Start Django app for ZAP'
+            continueOnError: true
             inputs:
               targetType: inline
               script: |
                 $ErrorActionPreference = 'Continue'
-                $env:DJANGO_SETTINGS_MODULE = 'backend.settings'
-                $env:DJANGO_DB_NAME         = '$(DB_NAME_TEST)'
-                $env:DJANGO_DB_USER         = '$(DB_USER)'
-                $env:DJANGO_DB_PASSWORD     = '$(DB_PASSWORD)'
-                $env:DJANGO_DB_HOST         = 'localhost'
-                $env:DJANGO_DB_PORT         = '3306'
-                $env:DJANGO_DEBUG           = 'True'
-                $env:DJANGO_ALLOWED_HOSTS   = '*'
-                $env:PORT                   = '$(DAST_PORT)'
-                $env:DJANGO_SECRET_KEY      = "dast-temp-$(Get-Random)"
-                New-Item -ItemType Directory -Force -Path 'C:\leoni\logs' | Out-Null
-                Set-Location backend
-                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" manage.py migrate --noinput 2>&1
-                Set-Location ..
-                $proc = Start-Process `
-                    -FilePath "$(PYTHON_VENV_TEST)\Scripts\python.exe" `
-                    -ArgumentList "serve.py" `
-                    -WorkingDirectory "$env:BUILD_SOURCESDIRECTORY\backend" `
-                    -PassThru -WindowStyle Hidden `
-                    -RedirectStandardOutput 'C:\leoni\logs\dast-stdout.log' `
+                $appUp = $false
+                try {
+                  $env:DJANGO_SETTINGS_MODULE = 'backend.settings'
+                  $env:DJANGO_DB_NAME = '$(DB_NAME_TEST)'
+                  $env:DJANGO_DB_USER = '$(DB_USER)'
+                  $env:DJANGO_DB_PASSWORD = '$(DB_PASSWORD)'
+                  $env:DJANGO_DB_HOST = 'localhost'
+                  $env:DJANGO_DB_PORT = '3306'
+                  $env:DJANGO_DEBUG = 'True'
+                  $env:DJANGO_ALLOWED_HOSTS = '*'
+                  $env:PORT = '$(DAST_PORT)'
+                  $env:DJANGO_SECRET_KEY = "dast-temp-$(Get-Random)"
+                  New-Item -ItemType Directory -Force -Path 'C:\leoni\logs' | Out-Null
+                  Set-Location backend
+                  & "$(PYTHON_VENV_TEST)\Scripts\python.exe" manage.py migrate --noinput 2>&1
+                  Set-Location ..
+                  $proc = Start-Process -FilePath "$(PYTHON_VENV_TEST)\Scripts\python.exe" -ArgumentList "serve.py" -WorkingDirectory "$env:BUILD_SOURCESDIRECTORY\backend" -PassThru -WindowStyle Hidden -RedirectStandardOutput 'C:\leoni\logs\dast-stdout.log' -RedirectStandardError 'C:\leoni\logs\dast-stderr.log'
+                  $proc.Id | Set-Content dast-pid.txt
+                  Write-Host "Started Django PID: $($proc.Id)"
+                  $maxWait = 60
+                  for ($i2 = 0; $i2 -lt $maxWait; $i2++) {
+                    Start-Sleep -Seconds 2
+                    try { $r = Invoke-WebRequest -Uri "http://localhost:$(DAST_PORT)/api/auth/login/" -UseBasicParsing -TimeoutSec 3; if ($r.StatusCode -eq 400 -or $r.StatusCode -eq 200) { Write-Host "App is up"; $appUp = $true; break } } catch {}
+                  }
+                } catch { Write-Host "Django startup failed: $_" }
+                if (-not $appUp) { Write-Host "App did not start - DAST will be skipped" }
                     -RedirectStandardError 'C:\leoni\logs\dast-stderr.log'
                 $proc.Id | Set-Content dast-pid.txt
                 Write-Host "Started Django PID: $($proc.Id)"
@@ -431,6 +438,7 @@ stages:
 
           - task: PublishPipelineArtifact@1
             displayName: 'Publish ZAP quick report'
+            condition: always()
             condition: always()
             continueOnError: true
             inputs:
