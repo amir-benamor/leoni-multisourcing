@@ -553,7 +553,7 @@ stages:
     displayName: 'Deploy to Production'
     dependsOn: DeployTest
     pool:
-      name: 'prod-server'
+      name: 'default'
     jobs:
       - deployment: DeployProdJob
         displayName: 'Deploy to prod-environment'
@@ -596,3 +596,4 @@ stages:
                       -DbPassword "$(DB_PASSWORD)"
                       -ServiceName "$(SERVICE_PROD)"
                       -ServicePort "$(PORT_PROD)"
+
