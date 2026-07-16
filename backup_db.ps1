@@ -17,9 +17,11 @@ if (-not (Test-Path $mysqldump)) {
 }
 
 $env:MYSQL_PWD = $DbPassword
-& $mysqldump -u $DbUser --databases $DbName --routines --triggers --single-transaction | Out-File -FilePath $backupFile -Encoding utf8
+$dumpSql = & $mysqldump -u $DbUser --databases $DbName --routines --triggers --single-transaction 2>$null
+$exitCode = $LASTEXITCODE
+$dumpSql | Out-File -FilePath $backupFile -Encoding utf8
 
-if ($LASTEXITCODE -eq 0) {
+if ($exitCode -eq 0) {
     Write-Host "Backup completed: $backupFile"
 } else {
     Write-Error "Backup failed for database: $DbName"
