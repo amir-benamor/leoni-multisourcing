@@ -460,9 +460,9 @@ stages:
               targetType: inline
               script: |
                 if (Test-Path dast-pid.txt) {
-                  $pid = Get-Content dast-pid.txt
-                  Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-                  Write-Host "Stopped Django PID: $pid"
+                  $savedPid = Get-Content dast-pid.txt
+                  Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+                  Write-Host "Stopped Django PID: $savedPid"
                 }
   - stage: Backup
     displayName: 'Database Backup'
@@ -491,7 +491,7 @@ stages:
                 -DbName $(DB_NAME_TEST)
                 -BackupDir $(BACKUP_DIR)
                 -DbUser $(DB_USER)
-                -DbPassword $(DB_PASSWORD)
+                -DbPassword "$(DB_PASSWORD)"
                 -MySqlBin "$(MYSQL_BIN)"
 
           - task: PublishPipelineArtifact@1
@@ -566,7 +566,7 @@ stages:
                       -DbName $(DB_NAME_PROD)
                       -BackupDir $(BACKUP_DIR)
                       -DbUser $(DB_USER)
-                      -DbPassword $(DB_PASSWORD)
+                      -DbPassword "$(DB_PASSWORD)"
                       -MySqlBin "$(MYSQL_BIN)"
 
                 - task: PowerShell@2
