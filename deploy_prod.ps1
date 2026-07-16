@@ -31,10 +31,9 @@ $env:DJANGO_DB_PORT = '3306'
 $env:DJANGO_SECRET_KEY = "prod-key-change-me-in-production"
 
 Set-Location $SourceDir\backend
-$migrateOut = & "$VenvPath\Scripts\python.exe" manage.py migrate --noinput 2>&1
+& "$VenvPath\Scripts\python.exe" manage.py migrate --noinput
 $exitCode = $LASTEXITCODE
-$migrateOut | ForEach-Object { Write-Host $_ }
-if ($exitCode -ne 0) { Write-Error "Migration failed"; exit 1 }
+if ($exitCode -ne 0) { Write-Error "Migration failed (exit $exitCode)"; exit 1 }
 
 # 4. Collect static files
 & "$VenvPath\Scripts\python.exe" manage.py collectstatic --noinput 2>&1 | Out-Null
