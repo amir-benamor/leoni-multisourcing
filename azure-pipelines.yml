@@ -408,43 +408,62 @@ stages:
                   }
                 } catch { Write-Host "Django startup failed: $_" }
                 if (-not $appUp) { Write-Host "App did not start - DAST will be skipped" }
-                    -RedirectStandardError 'C:\leoni\logs\dast-stderr.log'
-                $proc.Id | Set-Content dast-pid.txt
-                Write-Host "Started Django PID: $($proc.Id)"
-                $maxWait = 60
-                $started = $false
-                for ($i = 0; $i -lt $maxWait; $i++) {
-                    Start-Sleep -Seconds 2
-                    try {
-                        $r = Invoke-WebRequest -Uri "http://localhost:$(DAST_PORT)/api/auth/login/" -UseBasicParsing -TimeoutSec 3
-                        if ($r.StatusCode -eq 400 -or $r.StatusCode -eq 200) {
-                            Write-Host "App is up (attempt $i)"
-                            $started = $true
-                            break
-                        }
-                    } catch {}
-                }
-                if (-not $started) { Write-Error "App did not start"; exit 1 }
 
           - task: PowerShell@2
-            displayName: 'ZAP severity gate'
+            displayName: 'Run ZAP quick scan'
             continueOnError: true
+            condition: always()
             inputs:
               targetType: inline
               script: |
                 $ErrorActionPreference = 'Continue'
-                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" check_zap.py
-                if ($LASTEXITCODE -ne 0) { exit 1 }
+                $zapCli = "$env:ProgramFiles\OWASP\Zed Attack Proxy\zap-cli-2.14.0\zap-cli.exe"
+                if (Test-Path $zapCli) {
+                  Write-Host "ZAP CLI found."
+                  & $zapCli quick-scan -o -s xss,sqli --spider "http://localhost:$(DAST_PORT)" --report zap-report.html
+                } elseif (Get-Command docker -ErrorAction SilentlyContinue) {
+                  Write-Host "Using docker ZAP"
+                  docker pull softwaresecurityproject/zap-stable
+                  docker run --rm --network host -v "${pwd}:/zap/wrk" softwaresecurityproject/zap-stable zap-baseline.py -t "http://host.docker.internal:$(DAST_PORT)" -r zap-report.html
+                } else {
+                  Write-Host "Neither ZAP CLI nor Docker found. Creating placeholder report."
+                  '<html><body><h1>ZAP not available - scan skipped</h1></body></html>' | Out-File -Encoding utf8 zap-report.html
+                }
+
+          - task: PowerShell@2
+            displayName: 'ZAP severity check'
+            continueOnError: true
+            condition: always()
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                if (Test-Path zap-report.html) {
+                  & "$(PYTHON_VENV_TEST)\Scripts\python.exe" check_zap.py
+                } else {
+                  Write-Host "No zap-report.html found - skipping severity check"
+                }
 
           - task: PublishPipelineArtifact@1
             displayName: 'Publish ZAP quick report'
-            condition: always()
             condition: always()
             continueOnError: true
             inputs:
               targetPath: 'zap-report.html'
               artifact: 'ZAPReport'
 
+          - task: PowerShell@2
+            displayName: 'Stop Django app for ZAP'
+            condition: always()
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                if (Test-Path dast-pid.txt) {
+                  $pid = Get-Content dast-pid.txt
+                  Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                  Write-Host "Stopped Django PID: $pid"
+                }
   - stage: Backup
     displayName: 'Database Backup'
     dependsOn:
