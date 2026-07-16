@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+myenv/
+
+# Django
+backend/media/
+backend/staticfiles/
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Pipeline artifacts
+test-results/
+coverage-html/
+coverage.xml
+security-results/
+security-report.html
+*-report.json
+zap-report.html
+dast-pid.txt
+
+# Logs
+logs/

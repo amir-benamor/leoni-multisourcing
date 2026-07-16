@@ -1,0 +1,74 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 245 247 252;
+  --surface: 255 255 255;
+  --text: 14 23 38;
+  --muted: 100 112 132;
+  --border: 218 225 236;
+  --primary: 21 98 224;
+  --ring: 76 145 255;
+}
+
+.dark {
+  --bg: 9 15 27;
+  --surface: 14 24 41;
+  --text: 236 242 252;
+  --muted: 156 171 196;
+  --border: 53 69 96;
+  --primary: 95 165 255;
+  --ring: 120 182 255;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply m-0 min-h-screen bg-bg text-text antialiased;
+    font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+
+  a {
+    @apply text-inherit;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply border border-white/20 bg-white/10 backdrop-blur-md;
+    box-shadow:
+      0 1px 1px rgba(255, 255, 255, 0.18) inset,
+      0 18px 42px rgba(3, 12, 28, 0.25);
+  }
+
+  .premium-card {
+    background-image: linear-gradient(180deg, rgb(var(--surface)) 0%, rgb(var(--surface) / 0.98) 100%);
+  }
+
+  .animated-link {
+    @apply relative inline-block;
+  }
+
+  .animated-link::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    width: 100%;
+    height: 1px;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 220ms ease;
+    background: currentColor;
+    opacity: 0.75;
+  }
+
+  .animated-link:hover::after,
+  .animated-link:focus-visible::after {
+    transform: scaleX(1);
+  }
+}

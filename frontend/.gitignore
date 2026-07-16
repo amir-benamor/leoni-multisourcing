@@ -1,0 +1,5 @@
+﻿node_modules
+dist
+.vscode/*.code-snippets
+.DS_Store
+*.local

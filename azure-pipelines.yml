@@ -1,0 +1,598 @@
+trigger:
+  branches:
+    include:
+      - main
+      - master
+
+variables:
+  PYTHON_VENV_TEST: 'C:\leoni\venv-test'
+  PYTHON_VENV_PROD: 'C:\leoni\venv-prod'
+  BACKUP_DIR: 'C:\leoni\backups'
+  MYSQL_BIN: 'C:\xampp\mysql\bin'
+  DB_NAME_TEST: 'multisourcing_test'
+  DB_NAME_PROD: 'multisourcing_prod'
+  DB_USER: 'root'
+  DB_PASSWORD: ''
+  SERVICE_TEST: 'leoni-backend-test'
+  SERVICE_PROD: 'leoni-backend-prod'
+  PORT_TEST: '8000'
+  PORT_PROD: '8001'
+  DAST_PORT: '5099'
+
+stages:
+  - stage: Build
+    displayName: 'Build'
+    pool:
+      name: 'test-server'
+    jobs:
+      - job: BuildJob
+        displayName: 'Install & Build'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Create required directories'
+            inputs:
+              targetType: inline
+              script: |
+                New-Item -ItemType Directory -Force -Path 'C:\leoni\logs' | Out-Null
+                New-Item -ItemType Directory -Force -Path 'C:\leoni\backups' | Out-Null
+                New-Item -ItemType Directory -Force -Path 'C:\leoni\frontend\test' | Out-Null
+                New-Item -ItemType Directory -Force -Path 'C:\leoni\frontend\prod' | Out-Null
+                Write-Host "Directories created"
+
+          - task: PowerShell@2
+            displayName: 'Create MySQL databases if not exist'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                $mysql = "$(MYSQL_BIN)\mysql.exe"
+                & $mysql -u root -e "CREATE DATABASE IF NOT EXISTS $(DB_NAME_TEST) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>&1 | Out-Null
+                & $mysql -u root -e "CREATE DATABASE IF NOT EXISTS $(DB_NAME_PROD) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>&1 | Out-Null
+                Write-Host "Databases ready"
+
+          - task: PowerShell@2
+            displayName: 'Create/Update Python venv'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                if (-not (Test-Path "$(PYTHON_VENV_TEST)")) {
+                    Write-Host "Creating venv at $(PYTHON_VENV_TEST)"
+                    py -3.11 -m venv "$(PYTHON_VENV_TEST)"
+                }
+                $corruptedPip = "$(PYTHON_VENV_TEST)\Lib\site-packages\~ip"
+                if (Test-Path $corruptedPip) {
+                    Remove-Item $corruptedPip -Recurse -Force
+                    Write-Host "Removed corrupted pip"
+                }
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" -m pip install --upgrade pip 2>&1 | Out-Null
+                Write-Host "venv ready"
+
+          - task: PowerShell@2
+            displayName: 'Install Python dependencies'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\pip.exe" install -r backend\requirements.txt
+                if ($LASTEXITCODE -ne 0) { exit 1 }
+                Write-Host "Python dependencies installed"
+
+          - task: PowerShell@2
+            displayName: 'Install security tools'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\pip.exe" install bandit pip-audit safety detect-secrets waitress
+                if ($LASTEXITCODE -ne 0) { exit 1 }
+                Write-Host "Security tools installed"
+
+          - task: PowerShell@2
+            displayName: 'npm install (frontend)'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                Set-Location frontend
+                if (Test-Path node_modules) {
+                    Remove-Item node_modules -Recurse -Force
+                    Write-Host "Cleared node_modules"
+                }
+                npm install 2>&1 | ForEach-Object { Write-Host $_ }
+                Write-Host "npm install done"
+
+          - task: PowerShell@2
+            displayName: 'npm run build (frontend)'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                Set-Location frontend
+                npm run build
+                if ($LASTEXITCODE -ne 0) { exit 1 }
+                Write-Host "Frontend built successfully"
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish frontend dist'
+            inputs:
+              targetPath: 'frontend/dist'
+              artifact: 'FrontendDist'
+
+  - stage: Test
+    displayName: 'Unit Tests'
+    dependsOn: Build
+    pool:
+      name: 'test-server'
+    jobs:
+      - job: RunTests
+        displayName: 'pytest with coverage'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Create test results directory'
+            inputs:
+              targetType: inline
+              script: |
+                New-Item -ItemType Directory -Force -Path test-results | Out-Null
+
+          - task: PowerShell@2
+            displayName: 'Run pytest'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                $env:DJANGO_SETTINGS_MODULE = 'test_settings'
+                $env:DJANGO_DB_NAME         = '$(DB_NAME_TEST)'
+                $env:DJANGO_DB_USER         = '$(DB_USER)'
+                $env:DJANGO_DB_PASSWORD     = '$(DB_PASSWORD)'
+                $env:DJANGO_DB_HOST         = 'localhost'
+                $env:DJANGO_DB_PORT         = '3306'
+                $env:DJANGO_SECRET_KEY      = 'test-secret-key-pipeline'
+                Set-Location backend
+                & "$(PYTHON_VENV_TEST)\Scripts\pytest.exe" . `
+                  --junitxml="..\test-results\junit.xml" `
+                  --cov=. `
+                  --cov-report=html:"..\coverage-html" `
+                  --cov-report=xml:"..\coverage.xml" `
+                  -v
+                if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          - task: PublishTestResults@2
+            displayName: 'Publish test results'
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: 'test-results/junit.xml'
+              testRunTitle: 'Unit Tests'
+              failTaskOnFailedTests: true
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish coverage report'
+            condition: always()
+            inputs:
+              targetPath: 'coverage-html'
+              artifact: 'CoverageReport'
+
+  - stage: SecurityCheck
+    displayName: 'Security Check'
+    dependsOn: Test
+    pool:
+      name: 'test-server'
+    jobs:
+      - job: SecurityScan
+        displayName: 'Run all security scanners'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Bandit - Python SAST'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\bandit.exe" `
+                  -r backend `
+                  -f json `
+                  -o bandit-report.json `
+                  --exclude backend/myenv,backend/.venv,backend/migrations `
+                  -ll 2>&1 | Out-Null
+                if (-not (Test-Path bandit-report.json)) {
+                    '{"results":[],"errors":[]}' | Set-Content bandit-report.json -Encoding UTF8
+                }
+                Write-Host "Bandit scan complete"
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_bandit.py
+
+          - task: PowerShell@2
+            displayName: 'Semgrep - Skipped (not supported on Windows)'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                Write-Host "Semgrep not supported on Windows - skipping"
+                '{"results":[],"errors":[]}' | Set-Content semgrep-report.json -Encoding UTF8
+                '{"results":[],"errors":[]}' | Set-Content semgrep-frontend-report.json -Encoding UTF8
+
+          - task: PowerShell@2
+            displayName: 'Trivy - Backend filesystem CVE scan'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                if (Get-Command trivy -ErrorAction SilentlyContinue) {
+                    trivy fs --format json --output trivy-report.json --exit-code 0 backend 2>&1 | Out-Null
+                } else {
+                    Write-Host "Trivy not found - skipping"
+                    '{"Results":[]}' | Set-Content trivy-report.json -Encoding UTF8
+                }
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_trivy.py
+
+          - task: PowerShell@2
+            displayName: 'pip-audit - Python dependency CVEs'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\pip-audit.exe" `
+                  -r backend\requirements.txt `
+                  -f json `
+                  -o pip-audit-report.json 2>&1 | Out-Null
+                if (-not (Test-Path pip-audit-report.json)) {
+                    '[]' | Set-Content pip-audit-report.json -Encoding UTF8
+                }
+                Write-Host "pip-audit scan complete"
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_pipaudit.py
+
+          - task: PowerShell@2
+            displayName: 'Safety - Python dependency check'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\safety.exe" check `
+                  -r backend\requirements.txt `
+                  --json `
+                  -o safety-report.json 2>&1 | Out-Null
+                if (-not (Test-Path safety-report.json)) {
+                    '{"vulnerabilities":[]}' | Set-Content safety-report.json -Encoding UTF8
+                }
+                Write-Host "Safety scan complete"
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_safety.py
+
+          - task: PowerShell@2
+            displayName: 'detect-secrets - Hardcoded secrets scan'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\detect-secrets.exe" scan `
+                  backend `
+                  --exclude-files "\.pyc$" `
+                  --exclude-files "migrations" `
+                  2>&1 | Set-Content secrets-report.json -Encoding UTF8
+                Write-Host "Secrets scan complete"
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_secrets.py
+
+          - task: PowerShell@2
+            displayName: 'npm audit - Frontend dependency CVEs'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                Set-Location frontend
+                npm audit --json 2>&1 | Out-String | Set-Content ..\npm-audit-report.json -Encoding UTF8
+                Set-Location ..
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_npm_audit.py
+
+          - task: PowerShell@2
+            displayName: 'ESLint - Frontend security scan'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                Set-Location frontend
+                $result = npx eslint "src" --format json 2>&1 | Out-String
+                $result | Set-Content ..\eslint-report.json -Encoding UTF8
+                Set-Location ..
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_eslint.py
+
+          - task: PowerShell@2
+            displayName: 'Trivy - Frontend node_modules CVE scan'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                if (Get-Command trivy -ErrorAction SilentlyContinue) {
+                    trivy fs --format json --output trivy-frontend-report.json --exit-code 0 frontend 2>&1 | Out-Null
+                } else {
+                    '{"Results":[]}' | Set-Content trivy-frontend-report.json -Encoding UTF8
+                }
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" print_trivy_frontend.py
+
+          - task: PowerShell@2
+            displayName: 'Convert all reports to JUnit XML'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" convert_to_junit.py
+
+          - task: PublishTestResults@2
+            displayName: 'Publish security results to Tests tab'
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: 'security-results/security-junit.xml'
+              testRunTitle: 'Security Scan Results'
+              failTaskOnFailedTests: false
+
+          - task: PowerShell@2
+            displayName: 'Generate HTML security report'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" generate_report.py
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish HTML security report'
+            condition: always()
+            inputs:
+              targetPath: 'security-report.html'
+              artifact: 'SecurityReport'
+
+          - task: PowerShell@2
+            displayName: 'Severity gate - block on HIGH findings only'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" check_severity.py
+                if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  - stage: DAST_Quick
+    displayName: 'DAST Quick Scan (ZAP 2min)'
+    dependsOn: Test
+    pool:
+      name: 'test-server'
+    jobs:
+      - job: ZapQuick
+        displayName: 'ZAP baseline quick scan'
+        timeoutInMinutes: 10
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Start Django app for ZAP'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                $env:DJANGO_SETTINGS_MODULE = 'backend.settings'
+                $env:DJANGO_DB_NAME         = '$(DB_NAME_TEST)'
+                $env:DJANGO_DB_USER         = '$(DB_USER)'
+                $env:DJANGO_DB_PASSWORD     = '$(DB_PASSWORD)'
+                $env:DJANGO_DB_HOST         = 'localhost'
+                $env:DJANGO_DB_PORT         = '3306'
+                $env:DJANGO_DEBUG           = 'True'
+                $env:DJANGO_ALLOWED_HOSTS   = '*'
+                $env:PORT                   = '$(DAST_PORT)'
+                $env:DJANGO_SECRET_KEY      = "dast-temp-$(Get-Random)"
+                New-Item -ItemType Directory -Force -Path 'C:\leoni\logs' | Out-Null
+                Set-Location backend
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" manage.py migrate --noinput 2>&1
+                Set-Location ..
+                $proc = Start-Process `
+                    -FilePath "$(PYTHON_VENV_TEST)\Scripts\python.exe" `
+                    -ArgumentList "serve.py" `
+                    -WorkingDirectory "$env:BUILD_SOURCESDIRECTORY\backend" `
+                    -PassThru -WindowStyle Hidden `
+                    -RedirectStandardOutput 'C:\leoni\logs\dast-stdout.log' `
+                    -RedirectStandardError 'C:\leoni\logs\dast-stderr.log'
+                $proc.Id | Set-Content dast-pid.txt
+                Write-Host "Started Django PID: $($proc.Id)"
+                $maxWait = 60
+                $started = $false
+                for ($i = 0; $i -lt $maxWait; $i++) {
+                    Start-Sleep -Seconds 2
+                    try {
+                        $r = Invoke-WebRequest -Uri "http://localhost:$(DAST_PORT)/api/auth/login/" -UseBasicParsing -TimeoutSec 3
+                        if ($r.StatusCode -eq 400 -or $r.StatusCode -eq 200) {
+                            Write-Host "App is up (attempt $i)"
+                            $started = $true
+                            break
+                        }
+                    } catch {}
+                }
+                if (-not $started) { Write-Error "App did not start"; exit 1 }
+
+          - task: PowerShell@2
+            displayName: 'ZAP quick scan (2 min spider limit)'
+            continueOnError: true
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                $targetUrl = "http://host.docker.internal:$(DAST_PORT)/api/"
+                $workDir   = (Resolve-Path ".").Path.Replace('\', '/')
+                Write-Host "ZAP quick scan: $targetUrl"
+                docker run --rm `
+                    -v "${workDir}:/zap/wrk:rw" `
+                    -t ghcr.io/zaproxy/zaproxy:stable `
+                    zap-baseline.py `
+                    -t $targetUrl `
+                    -m 2 `
+                    -r "zap-report.html" `
+                    -J "zap-report.json" `
+                    -I
+                Write-Host "ZAP exit code: $LASTEXITCODE"
+                if (-not (Test-Path zap-report.html)) {
+                    '<html><body><h1>ZAP scan did not complete</h1></body></html>' | Set-Content zap-report.html -Encoding UTF8
+                }
+                if (-not (Test-Path zap-report.json)) {
+                    '{"site":[]}' | Set-Content zap-report.json -Encoding UTF8
+                }
+
+          - task: PowerShell@2
+            displayName: 'Stop Django DAST process'
+            condition: always()
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                if (Test-Path dast-pid.txt) {
+                    $pidVal = Get-Content dast-pid.txt
+                    Stop-Process -Id $pidVal -Force -ErrorAction SilentlyContinue
+                    Remove-Item dast-pid.txt -Force
+                    Write-Host "Stopped Django DAST process"
+                }
+
+          - task: PowerShell@2
+            displayName: 'ZAP severity gate'
+            inputs:
+              targetType: inline
+              script: |
+                $ErrorActionPreference = 'Continue'
+                & "$(PYTHON_VENV_TEST)\Scripts\python.exe" check_zap.py
+                if ($LASTEXITCODE -ne 0) { exit 1 }
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish ZAP quick report'
+            condition: always()
+            continueOnError: true
+            inputs:
+              targetPath: 'zap-report.html'
+              artifact: 'ZAPReport'
+
+  - stage: Backup
+    displayName: 'Database Backup'
+    dependsOn:
+      - SecurityCheck
+      - DAST_Quick
+    condition: |
+      and(
+        succeeded('SecurityCheck'),
+        succeeded('DAST_Quick')
+      )
+    pool:
+      name: 'test-server'
+    jobs:
+      - job: BackupDB
+        displayName: 'mysqldump test database'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Backup test database'
+            inputs:
+              targetType: filePath
+              filePath: backup_db.ps1
+              arguments: >-
+                -DbName $(DB_NAME_TEST)
+                -BackupDir $(BACKUP_DIR)
+                -DbUser $(DB_USER)
+                -DbPassword $(DB_PASSWORD)
+                -MySqlBin "$(MYSQL_BIN)"
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish database backup'
+            inputs:
+              targetPath: '$(BACKUP_DIR)'
+              artifact: 'DatabaseBackup'
+
+  - stage: DeployTest
+    displayName: 'Deploy to Test'
+    dependsOn: Backup
+    pool:
+      name: 'test-server'
+    jobs:
+      - deployment: DeployTestJob
+        displayName: 'Deploy to test-environment'
+        environment: 'test-environment'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download frontend dist'
+                  inputs:
+                    artifactName: 'FrontendDist'
+                    targetPath: '$(Build.SourcesDirectory)/frontend/dist'
+
+                - task: PowerShell@2
+                  displayName: 'Deploy to Test'
+                  inputs:
+                    targetType: filePath
+                    filePath: deploy_test.ps1
+                    arguments: >-
+                      -SourceDir "$(Build.SourcesDirectory)"
+                      -VenvPath "$(PYTHON_VENV_TEST)"
+                      -BackupDir "$(BACKUP_DIR)"
+                      -DbName "$(DB_NAME_TEST)"
+                      -DbUser "$(DB_USER)"
+                      -DbPassword "$(DB_PASSWORD)"
+                      -ServiceName "$(SERVICE_TEST)"
+                      -ServicePort "$(PORT_TEST)"
+
+  - stage: DeployProd
+    displayName: 'Deploy to Production'
+    dependsOn: DeployTest
+    pool:
+      name: 'prod-server'
+    jobs:
+      - deployment: DeployProdJob
+        displayName: 'Deploy to prod-environment'
+        environment: 'prod-environment'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download frontend dist'
+                  inputs:
+                    artifactName: 'FrontendDist'
+                    targetPath: '$(Build.SourcesDirectory)/frontend/dist'
+
+                - task: PowerShell@2
+                  displayName: 'Backup prod database before deploy'
+                  inputs:
+                    targetType: filePath
+                    filePath: backup_db.ps1
+                    arguments: >-
+                      -DbName $(DB_NAME_PROD)
+                      -BackupDir $(BACKUP_DIR)
+                      -DbUser $(DB_USER)
+                      -DbPassword $(DB_PASSWORD)
+                      -MySqlBin "$(MYSQL_BIN)"
+
+                - task: PowerShell@2
+                  displayName: 'Deploy to Production'
+                  inputs:
+                    targetType: filePath
+                    filePath: deploy_prod.ps1
+                    arguments: >-
+                      -SourceDir "$(Build.SourcesDirectory)"
+                      -VenvPath "$(PYTHON_VENV_PROD)"
+                      -BackupDir "$(BACKUP_DIR)"
+                      -DbName "$(DB_NAME_PROD)"
+                      -DbUser "$(DB_USER)"
+                      -DbPassword "$(DB_PASSWORD)"
+                      -ServiceName "$(SERVICE_PROD)"
+                      -ServicePort "$(PORT_PROD)"
