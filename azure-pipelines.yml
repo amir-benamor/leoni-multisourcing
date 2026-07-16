@@ -60,7 +60,7 @@ stages:
                 $ErrorActionPreference = 'Continue'
                 if (-not (Test-Path "$(PYTHON_VENV_TEST)")) {
                     Write-Host "Creating venv at $(PYTHON_VENV_TEST)"
-                    "C:\Users\Amir\AppData\Local\Programs\Python\Python311\python.exe" -m venv "$(PYTHON_VENV_TEST)"
+                    & "C:\Users\Amir\AppData\Local\Programs\Python\Python311\python.exe" -m venv "$(PYTHON_VENV_TEST)"
                 }
                 $corruptedPip = "$(PYTHON_VENV_TEST)\Lib\site-packages\~ip"
                 if (Test-Path $corruptedPip) {
@@ -596,6 +596,7 @@ stages:
                       -DbPassword "$(DB_PASSWORD)"
                       -ServiceName "$(SERVICE_PROD)"
                       -ServicePort "$(PORT_PROD)"
+
 
 
 
