@@ -154,7 +154,7 @@ export function HistoryDrawer({ run, open, onClose, initialSection = null }: His
             </div>
             <div>
               <p className="text-xs text-muted">Duration</p>
-              <p className="text-sm font-medium text-text">{formatDuration(run.duration_seconds)}</p>
+              <p className="text-sm font-medium text-text">{formatDuration(run.duration_seconds ?? 0)}</p>
             </div>
             <div>
               <p className="text-xs text-rose-500">Errors</p>
