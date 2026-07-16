@@ -23,7 +23,7 @@ stages:
   - stage: Build
     displayName: 'Build'
     pool:
-      name: 'test-server'
+      name: 'default'
     jobs:
       - job: BuildJob
         displayName: 'Install & Build'
@@ -125,7 +125,7 @@ stages:
     displayName: 'Unit Tests'
     dependsOn: Build
     pool:
-      name: 'test-server'
+      name: 'default'
     jobs:
       - job: RunTests
         displayName: 'pytest with coverage'
@@ -181,7 +181,7 @@ stages:
     displayName: 'Security Check'
     dependsOn: Test
     pool:
-      name: 'test-server'
+      name: 'default'
     jobs:
       - job: SecurityScan
         displayName: 'Run all security scanners'
@@ -367,7 +367,7 @@ stages:
     displayName: 'DAST Quick Scan (ZAP 2min)'
     dependsOn: Test
     pool:
-      name: 'test-server'
+      name: 'default'
     jobs:
       - job: ZapQuick
         displayName: 'ZAP baseline quick scan'
@@ -488,7 +488,7 @@ stages:
         succeeded('DAST_Quick')
       )
     pool:
-      name: 'test-server'
+      name: 'default'
     jobs:
       - job: BackupDB
         displayName: 'mysqldump test database'
@@ -517,7 +517,7 @@ stages:
     displayName: 'Deploy to Test'
     dependsOn: Backup
     pool:
-      name: 'test-server'
+      name: 'default'
     jobs:
       - deployment: DeployTestJob
         displayName: 'Deploy to test-environment'
