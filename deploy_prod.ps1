@@ -15,7 +15,7 @@ Write-Host "Database: $DbName"
 
 # 1. Create/update prod venv
 if (-not (Test-Path $VenvPath)) {
-    py -3.11 -m venv "$VenvPath"
+    & "C:\Users\Amir\AppData\Local\Programs\Python\Python311\python.exe" -m venv "$VenvPath"
 }
 
 # 2. Install dependencies
