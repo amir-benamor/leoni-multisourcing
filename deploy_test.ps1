@@ -19,8 +19,9 @@ if (-not (Test-Path $VenvPath)) {
 }
 
 # 2. Install dependencies
-& "$VenvPath\Scripts\pip.exe" install -r "$SourceDir\backend\requirements.txt" 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Error "pip install failed"; exit 1 }
+& "$VenvPath\Scripts\pip.exe" install -r "$SourceDir\backend\requirements.txt"
+$exitCode = $LASTEXITCODE
+if ($exitCode -ne 0) { Write-Error "pip install failed (exit $exitCode)"; exit 1 }
 
 # 3. Run migrations
 $env:DJANGO_DB_NAME = $DbName
