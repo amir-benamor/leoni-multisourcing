@@ -56,11 +56,9 @@ $env:SERVICE_NAME = $ServiceName
 $env:PORT = $ServicePort
 $logFile = "C:\leoni\logs\${ServiceName}.log"
 $proc = Start-Process `
-    -FilePath "$VenvPath\Scripts\python.exe" `
-    -ArgumentList "manage.py runserver 0.0.0.0:$ServicePort" `
+    -FilePath cmd.exe `
+    -ArgumentList "/c `"$VenvPath\Scripts\python.exe`" manage.py runserver 0.0.0.0:$ServicePort >> `"$logFile`" 2>&1" `
     -WorkingDirectory "$SourceDir\backend" `
-    -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput $logFile `
-    -RedirectStandardError $logFile
+    -PassThru -WindowStyle Hidden
 Write-Host "Started $ServiceName (PID: $($proc.Id)) on port $ServicePort"
 Write-Host "=== Deploy to Test Complete ==="

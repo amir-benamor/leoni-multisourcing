@@ -61,11 +61,9 @@ $env:DJANGO_SETTINGS_MODULE = 'backend.settings'
 $env:DJANGO_DEBUG = 'False'
 $logFile = "C:\leoni\logs\${ServiceName}.log"
 $proc = Start-Process `
-    -FilePath "$VenvPath\Scripts\python.exe" `
-    -ArgumentList "serve.py" `
+    -FilePath cmd.exe `
+    -ArgumentList "/c `"$VenvPath\Scripts\python.exe`" serve.py >> `"$logFile`" 2>&1" `
     -WorkingDirectory "$SourceDir\backend" `
-    -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput $logFile `
-    -RedirectStandardError $logFile
+    -PassThru -WindowStyle Hidden
 Write-Host "Started $ServiceName (PID: $($proc.Id)) on port $ServicePort with Waitress"
 Write-Host "=== Deploy to Production Complete ==="
