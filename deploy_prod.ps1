@@ -37,12 +37,7 @@ Set-Location $SourceDir\backend
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) { Write-Error "Migration failed (exit $exitCode)"; exit 1 }
 
-# 4. Collect static files
-& "$VenvPath\Scripts\python.exe" manage.py collectstatic --noinput
-$exitCode = $LASTEXITCODE
-if ($exitCode -ne 0) { Write-Error "collectstatic failed (exit $exitCode)"; exit 1 }
-
-# 5. Copy frontend dist to prod folder
+# 4. Copy frontend dist to prod folder
 $frontendProd = "C:\leoni\frontend\prod"
 if (Test-Path "$SourceDir\frontend\dist") {
     Remove-Item "$frontendProd\*" -Recurse -Force -ErrorAction SilentlyContinue
@@ -50,7 +45,7 @@ if (Test-Path "$SourceDir\frontend\dist") {
     Write-Host "Frontend dist deployed to $frontendProd"
 }
 
-# 6. Stop existing service
+# 5. Stop existing service
 $existing = Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match $ServiceName }
 if ($existing) {
     Stop-Process -Id $existing.Id -Force -ErrorAction SilentlyContinue
@@ -58,7 +53,7 @@ if ($existing) {
     Write-Host "Stopped existing $ServiceName"
 }
 
-# 7. Start production service with waitress
+# 6. Start production service with waitress
 $env:SERVICE_NAME = $ServiceName
 $env:PORT = $ServicePort
 $env:DJANGO_SETTINGS_MODULE = 'backend.settings'
