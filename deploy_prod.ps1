@@ -9,6 +9,7 @@ param(
     [string]$ServicePort
 )
 
+$ErrorActionPreference = 'Continue'
 Write-Host "=== Deploying to Production Environment ==="
 Write-Host "Service: $ServiceName on port $ServicePort"
 Write-Host "Database: $DbName"
@@ -37,7 +38,9 @@ $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) { Write-Error "Migration failed (exit $exitCode)"; exit 1 }
 
 # 4. Collect static files
-& "$VenvPath\Scripts\python.exe" manage.py collectstatic --noinput 2>&1 | Out-Null
+& "$VenvPath\Scripts\python.exe" manage.py collectstatic --noinput
+$exitCode = $LASTEXITCODE
+if ($exitCode -ne 0) { Write-Error "collectstatic failed (exit $exitCode)"; exit 1 }
 
 # 5. Copy frontend dist to prod folder
 $frontendProd = "C:\leoni\frontend\prod"

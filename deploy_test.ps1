@@ -9,6 +9,7 @@ param(
     [string]$ServicePort
 )
 
+$ErrorActionPreference = 'Continue'
 Write-Host "=== Deploying to Test Environment ==="
 Write-Host "Service: $ServiceName on port $ServicePort"
 Write-Host "Database: $DbName"
