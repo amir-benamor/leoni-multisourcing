@@ -464,45 +464,11 @@ stages:
                   Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
                   Write-Host "Stopped Django PID: $savedPid"
                 }
-  - stage: Backup
-    displayName: 'Database Backup'
+  - stage: DeployTest
+    displayName: 'Deploy to Test'
     dependsOn:
       - SecurityCheck
       - DAST_Quick
-    condition: |
-      and(
-        succeeded('SecurityCheck'),
-        succeeded('DAST_Quick')
-      )
-    pool:
-      name: 'default'
-    jobs:
-      - job: BackupDB
-        displayName: 'mysqldump test database'
-        steps:
-          - checkout: self
-
-          - task: PowerShell@2
-            displayName: 'Backup test database'
-            inputs:
-              targetType: filePath
-              filePath: backup_db.ps1
-              arguments: >-
-                -DbName $(DB_NAME_TEST)
-                -BackupDir $(BACKUP_DIR)
-                -DbUser $(DB_USER)
-                -DbPassword "$(DB_PASSWORD)"
-                -MySqlBin "$(MYSQL_BIN)"
-
-          - task: PublishPipelineArtifact@1
-            displayName: 'Publish database backup'
-            inputs:
-              targetPath: '$(BACKUP_DIR)'
-              artifact: 'DatabaseBackup'
-
-  - stage: DeployTest
-    displayName: 'Deploy to Test'
-    dependsOn: Backup
     pool:
       name: 'default'
     jobs:
@@ -556,18 +522,6 @@ stages:
                   inputs:
                     artifactName: 'FrontendDist'
                     targetPath: '$(Build.SourcesDirectory)/frontend/dist'
-
-                - task: PowerShell@2
-                  displayName: 'Backup prod database before deploy'
-                  inputs:
-                    targetType: filePath
-                    filePath: backup_db.ps1
-                    arguments: >-
-                      -DbName $(DB_NAME_PROD)
-                      -BackupDir $(BACKUP_DIR)
-                      -DbUser $(DB_USER)
-                      -DbPassword "$(DB_PASSWORD)"
-                      -MySqlBin "$(MYSQL_BIN)"
 
                 - task: PowerShell@2
                   displayName: 'Deploy to Production'

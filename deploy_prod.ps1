@@ -24,7 +24,24 @@ if (-not (Test-Path $VenvPath)) {
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) { Write-Error "pip install failed (exit $exitCode)"; exit 1 }
 
-# 3. Run migrations
+# 3. Backup database before migration
+$mysqlBin = "C:\xampp\mysql\bin"
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$backupFile = Join-Path $BackupDir "${DbName}_predeploy_${timestamp}.sql"
+New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+$mysqldump = Join-Path $mysqlBin "mysqldump.exe"
+$env:MYSQL_PWD = $DbPassword
+$dumpSql = & $mysqldump -u $DbUser --databases $DbName --routines --triggers --single-transaction 2>$null
+$exitCode = $LASTEXITCODE
+$dumpSql | Out-File -FilePath $backupFile -Encoding utf8
+if ($exitCode -eq 0) {
+    Write-Host "Pre-deploy backup saved: $backupFile"
+} else {
+    Write-Error "Pre-deploy backup failed for $DbName"
+    exit 1
+}
+
+# 4. Run migrations with rollback on failure
 $env:DJANGO_DB_NAME = $DbName
 $env:DJANGO_DB_USER = $DbUser
 $env:DJANGO_DB_PASSWORD = $DbPassword
@@ -35,9 +52,15 @@ $env:DJANGO_SECRET_KEY = "prod-key-change-me-in-production"
 Set-Location $SourceDir\backend
 & "$VenvPath\Scripts\python.exe" manage.py migrate --noinput
 $exitCode = $LASTEXITCODE
-if ($exitCode -ne 0) { Write-Error "Migration failed (exit $exitCode)"; exit 1 }
+if ($exitCode -ne 0) {
+    Write-Error "Migration failed (exit $exitCode) - rolling back database"
+    & "$SourceDir\restore_db.ps1" -DbName $DbName -BackupFile $backupFile -DbUser $DbUser -DbPassword $DbPassword -MySqlBin $mysqlBin
+    Write-Error "Rollback complete. Deploy aborted."
+    exit 1
+}
+Write-Host "Migration successful"
 
-# 4. Copy frontend dist to prod folder
+# 5. Copy frontend dist to prod folder
 $frontendProd = "C:\leoni\frontend\prod"
 if (Test-Path "$SourceDir\frontend\dist") {
     Remove-Item "$frontendProd\*" -Recurse -Force -ErrorAction SilentlyContinue
@@ -45,7 +68,7 @@ if (Test-Path "$SourceDir\frontend\dist") {
     Write-Host "Frontend dist deployed to $frontendProd"
 }
 
-# 5. Stop existing service
+# 6. Stop existing service
 $existing = Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match $ServiceName }
 if ($existing) {
     Stop-Process -Id $existing.Id -Force -ErrorAction SilentlyContinue
@@ -53,7 +76,7 @@ if ($existing) {
     Write-Host "Stopped existing $ServiceName"
 }
 
-# 6. Start production service with waitress
+# 7. Start production service with waitress
 $env:SERVICE_NAME = $ServiceName
 $env:PORT = $ServicePort
 $env:DJANGO_SETTINGS_MODULE = 'backend.settings'
