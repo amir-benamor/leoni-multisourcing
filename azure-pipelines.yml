@@ -464,11 +464,60 @@ stages:
                   Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
                   Write-Host "Stopped Django PID: $savedPid"
                 }
-  - stage: DeployTest
-    displayName: 'Deploy to Test'
+  - stage: Backup_Test
+    displayName: 'Backup Test Database'
     dependsOn:
       - SecurityCheck
       - DAST_Quick
+    pool:
+      name: 'default'
+    jobs:
+      - job: BackupTestDB
+        displayName: 'mysqldump multisourcing_test'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Backup test database'
+            inputs:
+              targetType: filePath
+              filePath: backup_db.ps1
+              arguments: >-
+                -DbName $(DB_NAME_TEST)
+                -BackupDir $(BACKUP_DIR)
+                -DbUser $(DB_USER)
+                -DbPassword "$(DB_PASSWORD)"
+                -MySqlBin "$(MYSQL_BIN)"
+
+  - stage: Migrate_Test
+    displayName: 'Migrate Test Database'
+    dependsOn: Backup_Test
+    pool:
+      name: 'default'
+    jobs:
+      - job: MigrateTestDB
+        displayName: 'migrate with rollback'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Run migrations on test DB'
+            inputs:
+              targetType: filePath
+              filePath: migrate_db.ps1
+              arguments: >-
+                -SourceDir "$(Build.SourcesDirectory)"
+                -VenvPath "$(PYTHON_VENV_TEST)"
+                -BackupDir "$(BACKUP_DIR)"
+                -DbName "$(DB_NAME_TEST)"
+                -DbUser "$(DB_USER)"
+                -DbPassword "$(DB_PASSWORD)"
+                -MySqlBin "$(MYSQL_BIN)"
+
+
+  - stage: DeployTest
+    displayName: 'Deploy to Test'
+    dependsOn: Migrate_Test
     pool:
       name: 'default'
     jobs:
@@ -502,9 +551,57 @@ stages:
                       -ServiceName "$(SERVICE_TEST)"
                       -ServicePort "$(PORT_TEST)"
 
+  - stage: Backup_Prod
+    displayName: 'Backup Production Database'
+    dependsOn: DeployTest
+    pool:
+      name: 'default'
+    jobs:
+      - job: BackupProdDB
+        displayName: 'mysqldump multisourcing_prod'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Backup production database'
+            inputs:
+              targetType: filePath
+              filePath: backup_db.ps1
+              arguments: >-
+                -DbName $(DB_NAME_PROD)
+                -BackupDir $(BACKUP_DIR)
+                -DbUser $(DB_USER)
+                -DbPassword "$(DB_PASSWORD)"
+                -MySqlBin "$(MYSQL_BIN)"
+
+  - stage: Migrate_Prod
+    displayName: 'Migrate Production Database'
+    dependsOn: Backup_Prod
+    pool:
+      name: 'default'
+    jobs:
+      - job: MigrateProdDB
+        displayName: 'migrate with rollback'
+        steps:
+          - checkout: self
+
+          - task: PowerShell@2
+            displayName: 'Run migrations on production DB'
+            inputs:
+              targetType: filePath
+              filePath: migrate_db.ps1
+              arguments: >-
+                -SourceDir "$(Build.SourcesDirectory)"
+                -VenvPath "$(PYTHON_VENV_PROD)"
+                -BackupDir "$(BACKUP_DIR)"
+                -DbName "$(DB_NAME_PROD)"
+                -DbUser "$(DB_USER)"
+                -DbPassword "$(DB_PASSWORD)"
+                -MySqlBin "$(MYSQL_BIN)"
+
   - stage: DeployProd
     displayName: 'Deploy to Production'
-    dependsOn: DeployTest
+    dependsOn: Migrate_Prod
     pool:
       name: 'default'
     jobs:
